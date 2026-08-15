@@ -28,7 +28,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 import sheets
 import texts
-from keyboards import channel_kb, upsell_kb, referral_share_kb
+from keyboards import channel_kb, upsell_kb, referral_share_kb, unknown_tariff_kb
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
@@ -214,7 +214,10 @@ async def cmd_start(message: Message, command: CommandObject):
     bot_info = await bot.get_me()
 
     if tariff is None:
-        await message.answer(texts.WELCOME_UNKNOWN)
+        await message.answer(
+            texts.WELCOME_UNKNOWN,
+            reply_markup=unknown_tariff_kb(config.INTENSIVE_SITE_LINK, config.SUPPORT_CONTACT_LINK),
+        )
         await log_to_admin_channel(
             f"❓ Открыл(а) бота без тарифа (странная ссылка): "
             f"{user.full_name} (@{user.username or 'без username'}, id {user.id})"
