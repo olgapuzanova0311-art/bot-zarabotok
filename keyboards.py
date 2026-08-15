@@ -16,7 +16,7 @@ def upsell_kb(url: str, text: str) -> InlineKeyboardMarkup:
 
 
 def referral_share_kb(ref_link: str) -> InlineKeyboardMarkup:
-    share_text = "Залетай на AI-интенсив 15-16 августа 🔥"
+    share_text = "Залетай на AI-интенсив 20-21 августа 🔥"
     tg_share_url = f"https://t.me/share/url?url={quote(ref_link, safe='')}&text={quote(share_text, safe='')}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Поделиться с другом", url=tg_share_url)]
