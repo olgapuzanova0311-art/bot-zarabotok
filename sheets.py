@@ -61,14 +61,49 @@ def _load_credentials() -> Credentials:
     if not raw:
         raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON не задан")
 
-    raw = raw.strip()
-    if raw.startswith("{"):
-        info = json.loads(raw)
-    else:
-        with open(raw, "r", encoding="utf-8") as f:
-            info = json.load(f)
+    # Убираем пробелы по краям, невидимый BOM-символ в начале (частая проблема при
+    # копипасте из некоторых редакторов) и внешние кавычки, если весь JSON случайно
+    # оказался обёрнут в них при вставке в Railway.
+    raw = raw.strip().lstrip("\ufeff").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        raw = raw[1:-1].strip()
 
-    return Credentials.from_service_account_info(info, scopes=SCOPES)
+    if raw.startswith("{"):
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"GOOGLE_SERVICE_ACCOUNT_JSON похож на JSON, но не парсится: {e}. "
+                f"Скопируй содержимое скачанного файла-ключа заново, одной строкой, "
+                f"без изменений."
+            )
+    elif len(raw) < 500 and "\n" not in raw:
+        # Похоже на путь к файлу, а не на JSON целиком — пробуем как файл.
+        try:
+            with open(raw, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except OSError as e:
+            raise RuntimeError(
+                f"GOOGLE_SERVICE_ACCOUNT_JSON не похож на JSON (не начинается с '{{') "
+                f"и не открылся как путь к файлу '{raw}': {e}. "
+                f"Вставь в эту переменную весь JSON сервисного аккаунта одной строкой, "
+                f"начиная с символа '{{'."
+            )
+    else:
+        raise RuntimeError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON не начинается с символа '{' — это не похоже на "
+            "валидный JSON. Проверь переменную в Railway: она должна содержать весь "
+            "JSON сервисного аккаунта одной строкой, без внешних кавычек и без "
+            "случайных символов в начале."
+        )
+
+    try:
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+    except (ValueError, KeyError) as e:
+        raise RuntimeError(
+            f"JSON в GOOGLE_SERVICE_ACCOUNT_JSON распарсился, но это не похоже на "
+            f"валидный ключ сервисного аккаунта: {e}"
+        )
 
 
 def init_sheets():
