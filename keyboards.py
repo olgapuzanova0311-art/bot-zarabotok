@@ -21,3 +21,10 @@ def referral_share_kb(ref_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Поделиться с другом", url=tg_share_url)]
     ])
+
+
+def unknown_tariff_kb(site_link: str, support_link: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Выбрать тариф на сайте", url=site_link)],
+        [InlineKeyboardButton(text="💬 Написать в поддержку", url=support_link)],
+    ])
