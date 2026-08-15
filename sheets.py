@@ -272,3 +272,25 @@ def get_all_broadcast_ids():
         if row and row[COL_TELEGRAM_ID - 1].strip().isdigit():
             ids.append(int(row[COL_TELEGRAM_ID - 1]))
     return ids
+
+
+def get_all_users():
+    """
+    Возвращает список всех пользователей с основными полями (telegram_id, username,
+    full_name, tariff, ref_code) — используется для команды /stats, чтобы пройтись
+    по всей базе и проверить у каждого статус подписки на канал.
+    """
+    all_values = _sheet.get_all_values()[1:]  # без шапки
+    users = []
+    for row in all_values:
+        if not row or not row[COL_TELEGRAM_ID - 1].strip().isdigit():
+            continue
+        padded = row + [""] * (len(HEADERS) - len(row))
+        users.append({
+            "telegram_id": padded[COL_TELEGRAM_ID - 1],
+            "username": padded[COL_USERNAME - 1],
+            "full_name": padded[COL_FULL_NAME - 1],
+            "tariff": padded[COL_TARIFF - 1],
+            "ref_code": padded[COL_REF_CODE - 1],
+        })
+    return users
