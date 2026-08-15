@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from aiogram.types import Message, ChatMemberUpdated
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -70,17 +70,53 @@ def safe_get_referrer_id(ref_code):
 
 async def log_to_admin_channel(text: str):
     """
-    Дублирует событие в приватный канал-журнал (ADMIN_LOG_CHAT_ID), полностью независимо
-    от Google Таблицы. Так даже если Sheets не подгрузились, ни один человек не потеряется:
-    ты увидишь его в канале в любом случае. Если канал не настроен, просто логирует ошибку
-    и не мешает остальной работе бота.
+    Дублирует событие в приватный канал-журнал (ADMIN_LOG_CHAT_ID) и ЛИЧНО в ЛС каждому
+    админу из ADMIN_IDS — полностью независимо от Google Таблицы. Так даже если Sheets
+    не подгрузились, ни один человек не потеряется: событие увидишь и в канале, и в личке.
+    Если канал не настроен, просто пропускает эту часть и не мешает остальной работе бота.
+    ВАЖНО: чтобы получать сообщения в ЛС, каждый id из ADMIN_IDS должен хотя бы раз
+    написать /start этому же боту — иначе Telegram не даёт ботам писать первыми.
     """
-    if not config.ADMIN_LOG_CHAT_ID:
-        return
-    try:
-        await bot.send_message(config.ADMIN_LOG_CHAT_ID, text)
-    except Exception as e:
-        log.error(f"Не удалось отправить в канал-журнал: {e}")
+    if config.ADMIN_LOG_CHAT_ID:
+        try:
+            await bot.send_message(config.ADMIN_LOG_CHAT_ID, text)
+        except Exception as e:
+            log.error(f"Не удалось отправить в канал-журнал: {e}")
+
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception as e:
+            log.warning(f"Не удалось отправить админу {admin_id} в ЛС: {e}")
+
+
+async def check_user_channel_status(user_id: int) -> str:
+    """
+    Живая проверка подписки конкретного пользователя на каналы Стандарт/VIP через API.
+    Работает, только если EVENT_CHANNEL_ID / VIP_CHANNEL_ID заданы как ЧИСЛОВЫЕ ID
+    (не просто ссылка-приглашение) и бот добавлен в эти каналы администратором.
+    """
+    parts = []
+    checks = [
+        ("Стандарт", config.EVENT_CHANNEL_ID),
+        ("VIP", config.VIP_CHANNEL_ID),
+    ]
+    for label, channel_id in checks:
+        if not channel_id:
+            parts.append(f"{label}: ⚠️ ID канала не задан")
+            continue
+        try:
+            member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+            joined = member.status in (
+                ChatMemberStatus.MEMBER,
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.CREATOR,
+            )
+            parts.append(f"{label}: {'✅' if joined else '❌'}")
+        except Exception as e:
+            log.warning(f"Не удалось проверить подписку {user_id} на {label}: {e}")
+            parts.append(f"{label}: ⚠️ не проверить")
+    return " | ".join(parts)
 
 
 # ---------- вспомогательные функции ----------
@@ -253,13 +289,15 @@ async def cmd_start(message: Message, command: CommandObject):
         )
         return
 
-    # Логируем в канал-журнал сразу, до всех обращений к Sheets, так человек
+    # Логируем в канал-журнал и в ЛС сразу, до всех обращений к Sheets, так человек
     # точно попадёт в журнал, даже если дальше что-то сломается
     tariff_label = config.TARIFF_NAMES.get(tariff, tariff)
+    channel_status = await check_user_channel_status(user.id)
     await log_to_admin_channel(
         f"🆕 Дошёл до бота, тариф {tariff_label}: {user.full_name} "
         f"(@{user.username or 'без username'}, id {user.id})"
         + (f", по рефссылке {ref_code}" if ref_code else "")
+        + f"\n📢 {channel_status}"
     )
 
     referred_by_id = safe_get_referrer_id(ref_code) if ref_code else None
@@ -357,6 +395,56 @@ async def cmd_broadcast(message: Message, command: CommandObject):
         await asyncio.sleep(0.05)  # антифлуд, ~20 сообщений/сек
 
     await status_msg.edit_text(f"Готово ✅ Доставлено: {sent}, не доставлено: {failed}")
+
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """
+    Сводка по всем участникам: ник, тариф (этап) и живой статус подписки на оба канала.
+    Только для админов. Может занять время на большой базе — проверка подписки идёт
+    по одному запросу к Telegram API на каждого участника.
+    """
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    if not SHEETS_READY:
+        await message.answer(
+            "⚠️ Google Таблица не подключена, список участников недоступен. "
+            "Проверь переменные GOOGLE_SHEET_ID и GOOGLE_SERVICE_ACCOUNT_JSON на Railway."
+        )
+        return
+
+    try:
+        users = sheets.get_all_users()
+    except Exception as e:
+        log.error(f"Ошибка чтения Google Sheets (cmd_stats): {e}")
+        await message.answer("Не получилось прочитать список участников из таблицы.")
+        return
+
+    if not users:
+        await message.answer("Пока никто не зарегистрировался.")
+        return
+
+    status_msg = await message.answer(f"Собираю статус по {len(users)} участникам, подожди...")
+
+    lines = [f"📊 Сводка по участникам ({len(users)}):\n"]
+    for u in users:
+        uname = f"@{u['username']}" if u["username"] else "(без ника)"
+        tariff_label = config.TARIFF_NAMES.get(u["tariff"], u["tariff"] or "—")
+        status = await check_user_channel_status(int(u["telegram_id"]))
+        lines.append(f"{uname} — {u['full_name'] or '—'} | {tariff_label} | {status}")
+        await asyncio.sleep(0.1)  # антифлуд к Telegram API
+
+    text = "\n".join(lines)
+
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
+
+    # Telegram ограничивает длину сообщения ~4096 символов — режем на части при необходимости
+    for i in range(0, len(text), 4000):
+        await message.answer(text[i:i + 4000])
 
 
 @dp.message(F.text.lower().contains("забрать бонус"))
