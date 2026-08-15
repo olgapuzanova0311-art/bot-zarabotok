@@ -368,7 +368,7 @@ async def main():
         log.info("Google Sheets подключены")
     except Exception as e:
         log.error(
-            f"Не удалось подключить Google Sheets: {e}\n"
+            f"Не удалось подключить Google Sheets: [{type(e).__name__}] {e!r}\n"
             "Бот всё равно запустится и будет регистрировать людей и выдавать ссылки на каналы, "
             "просто без записи в таблицу и без счётчика рефералов. "
             "Проверь переменные GOOGLE_SHEET_ID и GOOGLE_SERVICE_ACCOUNT_JSON на Railway, "
