@@ -173,10 +173,13 @@ def get_referrer_telegram_id(ref_code):
 
 def _find_row_by_telegram_id(telegram_id: int):
     """Возвращает (номер_строки, значения_строки) или (None, None)."""
-    cell = None
     try:
         cell = _sheet.find(str(telegram_id), in_column=COL_TELEGRAM_ID)
     except gspread.exceptions.CellNotFound:
+        return None, None
+    # В некоторых версиях gspread find() не бросает исключение при отсутствии
+    # совпадения, а просто возвращает None — обрабатываем и этот случай тоже.
+    if cell is None:
         return None, None
     row_values = _sheet.row_values(cell.row)
     return cell.row, row_values
