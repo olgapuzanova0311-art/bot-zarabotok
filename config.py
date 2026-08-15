@@ -52,6 +52,10 @@ TARIFF_NAMES = {
 FLAGSHIP_COURSE_LINK = os.getenv("FLAGSHIP_COURSE_LINK", "https://example.com/flagship")
 VIP_UPGRADE_LINK = os.getenv("VIP_UPGRADE_LINK", "https://example.com/vip")
 
+# --- Сайт интенсива и поддержка: используются в сообщении, когда бот не видит тариф ---
+INTENSIVE_SITE_LINK = os.getenv("INTENSIVE_SITE_LINK", "https://olgapuzanova0311-art.github.io/zarabotok/")
+SUPPORT_CONTACT_LINK = os.getenv("SUPPORT_CONTACT_LINK", "https://t.me/puzanovateam")
+
 # --- Реферальная программа: пороги и бонусы ---
 REFERRAL_TIERS = [
     {"count": 1, "reward": "Гайд «5 AI-инструментов для быстрого старта» (PDF)"},
