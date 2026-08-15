@@ -16,6 +16,7 @@
 
 import asyncio
 import logging
+import traceback
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F
@@ -394,6 +395,7 @@ async def main():
     except Exception as e:
         log.error(
             f"Не удалось подключить Google Sheets: [{type(e).__name__}] {e!r}\n"
+            f"Полный traceback:\n{traceback.format_exc()}\n"
             "Бот всё равно запустится и будет регистрировать людей и выдавать ссылки на каналы, "
             "просто без записи в таблицу и без счётчика рефералов. "
             "Проверь переменные GOOGLE_SHEET_ID и GOOGLE_SERVICE_ACCOUNT_JSON на Railway, "
