@@ -170,6 +170,32 @@ async def check_and_reward_referrer(referrer_id: int):
         pass
 
 
+async def schedule_referral_pitch(user_id: int, my_ref_code: str, bot_username: str, tariff: str):
+    """Отправляет питч реферальной программы отдельным сообщением через 15 минут после регистрации."""
+    delay_seconds = 60 * 15  # 15 минут, чтобы не наваливать всё сразу
+
+    async def send_pitch():
+        try:
+            my_ref_link = f"https://t.me/{bot_username}?start={tariff}_{my_ref_code}"
+            await bot.send_message(
+                user_id,
+                texts.REFERRAL_PITCH.format(ref_link=my_ref_link, tiers=texts.referral_tiers_text()),
+                reply_markup=referral_share_kb(my_ref_link),
+            )
+        except Exception as e:
+            log.warning(f"Не удалось отправить питч рефералки {user_id}: {e}")
+
+    run_at = datetime.now() + timedelta(seconds=delay_seconds)
+    scheduler.add_job(
+        send_pitch,
+        trigger="date",
+        run_date=run_at,
+        id=f"referral_pitch_{user_id}",
+        misfire_grace_time=3600,
+        replace_existing=True,
+    )
+
+
 async def schedule_upsell(user_id: int, tariff: str):
     """Ставит апсейл-сообщение с задержкой (через APScheduler)."""
     delay_seconds = 60 * 60 * 3  # через 3 часа после регистрации, поправь под себя
@@ -250,14 +276,10 @@ async def cmd_start(message: Message, command: CommandObject):
     channel_link = await get_channel_invite_link(tariff)
 
     text = texts.WELCOME_VIP if tariff == config.TARIFF_VIP else texts.WELCOME_FREE
-    my_ref_link = f"https://t.me/{bot_info.username}?start={tariff}_{my_ref_code}"
+    await message.answer(text.format(channel_link=channel_link), reply_markup=channel_kb(channel_link))
 
-    full_text = text.format(channel_link=channel_link) + texts.REFERRAL_INTRO.format(
-        ref_link=my_ref_link, tiers=texts.referral_tiers_text()
-    )
-
-    await message.answer(full_text, reply_markup=channel_kb(channel_link))
-    await message.answer("Твоя личная реферальная ссылка 👇", reply_markup=referral_share_kb(my_ref_link))
+    # реферальную ссылку и бонусы шлём отдельным сообщением позже, чтобы не наваливать всё сразу
+    await schedule_referral_pitch(user.id, my_ref_code, bot_info.username, tariff)
 
     # уведомляем и награждаем того, кто пригласил
     if referred_by_id:
