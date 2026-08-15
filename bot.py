@@ -22,8 +22,8 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
+from aiogram.types import Message, ChatMemberUpdated
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
@@ -171,7 +171,7 @@ async def check_and_reward_referrer(referrer_id: int):
         pass
 
 
-async def schedule_referral_pitch(user_id: int, my_ref_code: str, bot_username: str, tariff: str):
+async def schedule_referral_pitch(user_id: int, my_ref_code: str, bot_username: str, tariff: str, user_label: str):
     """Отправляет питч реферальной программы отдельным сообщением через 15 минут после регистрации."""
     delay_seconds = 60 * 15  # 15 минут, чтобы не наваливать всё сразу
 
@@ -183,6 +183,7 @@ async def schedule_referral_pitch(user_id: int, my_ref_code: str, bot_username: 
                 texts.REFERRAL_PITCH.format(ref_link=my_ref_link, tiers=texts.referral_tiers_text()),
                 reply_markup=referral_share_kb(my_ref_link),
             )
+            await log_to_admin_channel(f"📨 Получил(а) питч рефералки: {user_label}")
         except Exception as e:
             log.warning(f"Не удалось отправить питч рефералки {user_id}: {e}")
 
@@ -197,7 +198,7 @@ async def schedule_referral_pitch(user_id: int, my_ref_code: str, bot_username: 
     )
 
 
-async def schedule_upsell(user_id: int, tariff: str):
+async def schedule_upsell(user_id: int, tariff: str, user_label: str):
     """Ставит апсейл-сообщение с задержкой (через APScheduler)."""
     delay_seconds = 60 * 60 * 3  # через 3 часа после регистрации, поправь под себя
 
@@ -215,6 +216,7 @@ async def schedule_upsell(user_id: int, tariff: str):
                     texts.UPSELL_FLAGSHIP_FOR_VIP.format(flagship_link=config.FLAGSHIP_COURSE_LINK),
                     reply_markup=upsell_kb(config.FLAGSHIP_COURSE_LINK, "🎓 Узнать про курс"),
                 )
+            await log_to_admin_channel(f"💌 Получил(а) апсейл: {user_label}")
         except Exception as e:
             log.warning(f"Не удалось отправить апсейл {user_id}: {e}")
 
@@ -279,15 +281,17 @@ async def cmd_start(message: Message, command: CommandObject):
     text = texts.WELCOME_VIP if tariff == config.TARIFF_VIP else texts.WELCOME_FREE
     await message.answer(text.format(channel_link=channel_link), reply_markup=channel_kb(channel_link))
 
+    user_label = f"{user.full_name} (@{user.username or 'без username'}, id {user.id})"
+
     # реферальную ссылку и бонусы шлём отдельным сообщением позже, чтобы не наваливать всё сразу
-    await schedule_referral_pitch(user.id, my_ref_code, bot_info.username, tariff)
+    await schedule_referral_pitch(user.id, my_ref_code, bot_info.username, tariff, user_label)
 
     # уведомляем и награждаем того, кто пригласил
     if referred_by_id:
         await check_and_reward_referrer(referred_by_id)
 
     # ставим отложенный апсейл
-    await schedule_upsell(user.id, tariff)
+    await schedule_upsell(user.id, tariff, user_label)
 
 
 @dp.message(Command("moi_ref"))
@@ -371,6 +375,47 @@ async def claim_bonus(message: Message):
         f"(@{message.from_user.username or 'без username'}, id {message.from_user.id})"
     )
     await message.answer("Заявку получила, бонус вышлю вручную в ближайшее время 🙌")
+
+
+def _channel_label(chat_id) -> str:
+    """Понятное название канала для уведомлений (мероприятие / VIP)."""
+    if config.VIP_CHANNEL_ID and chat_id == config.VIP_CHANNEL_ID:
+        return "VIP-канал"
+    if config.EVENT_CHANNEL_ID and chat_id == config.EVENT_CHANNEL_ID:
+        return "канал мероприятия"
+    return "канал"
+
+
+def _is_tracked_channel(chat_id) -> bool:
+    return (config.EVENT_CHANNEL_ID and chat_id == config.EVENT_CHANNEL_ID) or (
+        config.VIP_CHANNEL_ID and chat_id == config.VIP_CHANNEL_ID
+    )
+
+
+@dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
+async def on_channel_join(event: ChatMemberUpdated):
+    """Срабатывает, когда кто-то вступает в канал мероприятия или VIP-канал.
+    Требует, чтобы EVENT_CHANNEL_ID / VIP_CHANNEL_ID были заданы числовыми ID
+    (не просто ссылкой-приглашением), а бот был администратором этих каналов."""
+    if not _is_tracked_channel(event.chat.id):
+        return
+    user = event.new_chat_member.user
+    await log_to_admin_channel(
+        f"✅ Вступил(а) в {_channel_label(event.chat.id)}: {user.full_name} "
+        f"(@{user.username or 'без username'}, id {user.id})"
+    )
+
+
+@dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=LEAVE_TRANSITION))
+async def on_channel_leave(event: ChatMemberUpdated):
+    """Срабатывает, когда кто-то выходит из канала (или его удаляют/банят)."""
+    if not _is_tracked_channel(event.chat.id):
+        return
+    user = event.old_chat_member.user
+    await log_to_admin_channel(
+        f"🚪 Вышел(а) из {_channel_label(event.chat.id)}: {user.full_name} "
+        f"(@{user.username or 'без username'}, id {user.id})"
+    )
 
 
 # ---------- запуск ----------
