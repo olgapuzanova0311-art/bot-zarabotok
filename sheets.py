@@ -83,7 +83,21 @@ def init_sheets():
 
     creds = _load_credentials()
     _client = gspread.authorize(creds)
-    spreadsheet = _client.open_by_key(config.GOOGLE_SHEET_ID)
+
+    try:
+        spreadsheet = _client.open_by_key(config.GOOGLE_SHEET_ID)
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise RuntimeError(
+            f"Таблица с ID '{config.GOOGLE_SHEET_ID}' не найдена сервисным аккаунтом "
+            f"({creds.service_account_email}). Либо GOOGLE_SHEET_ID указан неверно, "
+            f"либо таблица не расшарена на этот email с правами Редактор."
+        )
+    except gspread.exceptions.APIError as e:
+        raise RuntimeError(
+            f"Google Sheets API вернул ошибку при открытии таблицы: {e}. "
+            f"Проверь, что Google Sheets API и Google Drive API включены в проекте "
+            f"сервисного аккаунта в Google Cloud Console."
+        )
 
     try:
         _sheet = spreadsheet.worksheet(SHEET_NAME)
